@@ -1,10 +1,11 @@
-#What can you learn about on the Freakonomics Radio Podcast? 
+# What can you learn about on the Freakonomics Radio Podcast? 
+
 An analysis of transcripts from 468 episodes over the past 10 years can tell you: people, time, and money.
 
 
 The Freakonomics Radio Podcast hosts transcripts of their episodes on https://freakonomics.com/archive/. 
 This project used Python (BeautifulSoup) to scrape these, and R (tidytext, udpipe) to extract keywords and phrases. 
-Thanks very much to @amrwrites for his great article on using udpipe in R (https://towardsdatascience.com/easy-text-analysis-on-abc-news-headlines-b434e6e3b5b8), 
+Thanks very much to @amrwrites for their great article on using udpipe in R (https://towardsdatascience.com/easy-text-analysis-on-abc-news-headlines-b434e6e3b5b8), 
 from which I pulled plenty of inspiration.
 
 Freakonomics Radio invites listeners to "discover the hidden side of everything."
