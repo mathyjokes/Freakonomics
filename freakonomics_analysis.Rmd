@@ -3,8 +3,7 @@ title: "freakonomics_analysis"
 output: html_document
 ---
 
-# What can you learn about on Freakonomics? An analysis of transcripts from 468 episodes over the past 10 years can tell you: people, time, and money (and a wordcloud because I couldn't resist)
-
+First things first - load packages and set up text
 ```{r}
 library(tidyverse)
 library(tidytext)
@@ -13,11 +12,13 @@ library(rvest)
 library(wordcloud)
 library(textclean)
 library(ggthemes)
+library(udpipe)
 
 pods <- read_csv("FREAKONOMICS_EPISODES.csv")
 
+# remember to load up promo_words from next chunk first
 # it's, that's, don't, i'm, you're, there's, we're, they're, didn't
-pod_text <- pods %>% 
+pods <- pods %>% 
   mutate(Text = str_replace_all(Text, "Listen and subscribe to our podcast at Apple Podcasts, Stitcher, or elsewhere", "")) %>% 
   mutate(Text = str_replace_all(Text, "Below is a transcript of the episode, edited for readability", "")) %>%
   mutate(Text = str_replace_all(Text, "For more information on the people and ideas in the episode, see the links at the bottom of this post", "")) %>%
@@ -29,7 +30,7 @@ pod_text <- pods %>%
   mutate(Text = str_replace_all(Text, 'Our theme song is "Mr. Fortune," by the Hitchhikers', "")) %>%
   mutate(Text = str_replace_all(Text, "all the other music was composed by Luis Guerra", "")) %>%
   mutate(Text = str_replace_all(Text, "You can subscribe to Freakonomics Radio on Apple Podcasts, Stitcher, or wherever you get your podcasts", "")) %>%
-# can't  
+  
   mutate(Text = tolower(Text)) %>% 
   mutate(Text = replace_contraction(Text)) %>% 
   mutate(Text = str_replace_all(Text, "it's", "it is")) %>% 
@@ -60,86 +61,158 @@ pod_text <- pods %>%
   mutate(Text = str_replace_all(Text, "we'll", "we will")) %>% 
   mutate(Text = str_replace_all(Text, "wouldn't", "would not")) %>% 
   mutate(Text = str_replace_all(Text, "here's", "here is"))
-
-
-# remember to load up promo_words from next chunk first
-pod_test <- pod_text %>% 
-  unnest_tokens(word, Text) %>% 
-  group_by(Title) %>% 
-  mutate(id = row_number()) %>% 
-  ungroup() %>% 
-  anti_join(stop_words)#%>%  anti_join(promo_words)
 ```
 
 
+Using Udpipe!
 ```{r}
-##################################  HISTOGRAM OF TOP WORDS  ##################################
-#ggsave('top_words_.png', 
-pod_test %>% 
-  filter(word != "dubner") %>% 
-  filter(word != "freakonomics") %>% 
-  filter(word != "radio") %>% 
-  filter(word != "lot") %>% 
-  filter(word != "episode") %>% 
-  filter(word != "yeah") %>% 
-  filter(word != "podcast") %>% 
-  filter(word != "10") %>% 
-  count(word, sort = T) %>% 
-  filter(n > 1500) %>% 
-  mutate(word = reorder(word, n))%>% 
-  ggplot(aes(word, n)) +
+####################### Seperate sentences into their own row #######################
+podcast_scripts <- pods %>% 
+  mutate(Text = str_replace_all(Text, "\n", "")) %>% 
+  separate_rows(Text, sep = "\\.") 
+
+####################### There are 131,067 sentences.... #######################
+podcast_scripts %>% 
+  glimpse()
+
+####################### Download and load premade udpipe model #######################
+model <- udpipe_download_model(language = "english")
+udmodel_english <- udpipe_load_model(file = 'english-ewt-ud-2.4-190531.udpipe')
+
+####################### Run the model over the transcripts #######################
+podcast_annotate <- udpipe_annotate(udmodel_english, podcast_scripts$Text)
+podcast_annotate_df <- data.frame(podcast_annotate)
+
+####################### There are 2,464,503 tokens.... #######################
+podcast_annotate_df %>% 
+  glimpse()
+
+####################### And 32,566 unique lemmas #######################
+podcast_annotate_df %>% 
+  count(lemma) %>% 
+  glimpse()
+
+
+####################### Most common occuring parts of speech #######################
+
+#################### Nouns ####################
+# make it a table #
+ggsave('freak_common_nouns.png',
+podcast_annotate_df %>% 
+  filter(upos == "NOUN") %>% 
+  count(lemma, sort = T, name = "count") %>% 
+  head(20) %>% 
+  mutate(lemma = reorder(lemma, count))%>% 
+  ggplot(aes(lemma, count)) +
     geom_col() +
     xlab(NULL) +
-    coord_flip() +
-    theme_fivethirtyeight()
-#, height = 15, width = 7)
-
-##################################  WORDCLOUD OF TOP WORDS  ##################################
-ggsave('freak_wordcloud.png',
-pod_test %>% 
-  count(word) %>% 
-  filter(word != "dubner") %>% 
-  filter(word != "freakonomics") %>% 
-  filter(word != "radio") %>% 
-  filter(word != "lot") %>% 
-  filter(word != "episode") %>% 
-  filter(word != "yeah") %>% 
-  filter(word != "podcast") %>% 
-  filter(word != "10") %>% 
-  with(wordcloud(word, n, max.words = 100))
+    coord_flip() + 
+    theme_fivethirtyeight() +
+    labs(title = "Most Common Nouns")
 )
 
-as.character(pod_text[1,3])
+# make it a wordcloud! #
+ggsave('freak_wordcloud_noun.png',
+podcast_annotate_df %>% 
+  filter(upos == "NOUN") %>% 
+  count(lemma, sort = T, name = "count") %>% 
+  filter(lemma != "dubner") %>% 
+  filter(lemma != "freakonomics") %>% 
+  filter(lemma != "radio") %>% 
+  filter(lemma != "lot") %>% 
+  filter(lemma != "episode") %>% 
+  filter(lemma != "yeah") %>% 
+  filter(lemma != "podcast") %>% 
+  filter(lemma != "10") %>% 
+  with(wordcloud(lemma, count, max.words = 100))
+)
 
-##################################  SENTIMENT BY EPISODE  ##################################
-pod_test %>% 
-  inner_join(get_sentiments("bing")) %>% 
-  add_count(word, sentiment) %>% 
-  spread(sentiment, n, fill = 0) %>% 
-  filter(id < 10000) %>% 
-  mutate(sentiment = positive - negative) %>% 
-  ggplot(aes(id, sentiment, fill = Title)) +
-    geom_col(show.legend = F)
+#################### Verbs ####################
+# make it a table #
+ggsave('freak_common_verbs.png',
+podcast_annotate_df %>% 
+  filter(upos == "VERB") %>% 
+  count(lemma, sort = T, name = "count") %>% 
+  head(20) %>% 
+  mutate(lemma = reorder(lemma, count))%>% 
+  ggplot(aes(lemma, count)) +
+    geom_col() +
+    xlab(NULL) +
+    coord_flip() + 
+    theme_fivethirtyeight() +
+    labs(title = "Most Common Verbs")
+)
 
-##################################  BI/TRIGRAMS  ##################################
-freak_bigrams <- pod_text %>% 
-  unnest_tokens(bigram, Text, token = "ngrams", n = 3) %>% 
-  separate(bigram, c("word1", "word2", "word3"), sep = " ") %>% 
-  filter(!word1 %in% c(stop_words$word, promo_words)) %>% 
-  filter(!word2 %in% c(stop_words$word, promo_words)) %>% 
-  filter(!word3 %in% c(stop_words$word, promo_words))
+# make it a wordcloud! #
+ggsave('freak_wordcloud_verb.png',
+podcast_annotate_df %>% 
+  filter(upos == "VERB") %>% 
+  count(lemma, sort = T, name = "count") %>% 
+  with(wordcloud(lemma, count, max.words = 100))
+)
 
-freak_bigrams %>% 
-  count(word1, word2, word3, sort = T)
-```
+#################### Nouns ####################
+# make it a table #
+ggsave('freak_common_adjs.png',
+podcast_annotate_df %>% 
+  filter(upos == "ADJ") %>% 
+  count(lemma, sort = T, name = "count") %>% 
+  head(20) %>% 
+  mutate(lemma = reorder(lemma, count))%>% 
+  ggplot(aes(lemma, count)) +
+    geom_col() +
+    xlab(NULL) +
+    coord_flip() + 
+    theme_fivethirtyeight() +
+    labs(title = "Most Common Adjectives")
+)
+
+# make it a wordcloud! #
+ggsave('freak_wordcloud_adj.png',
+podcast_annotate_df %>% 
+  filter(upos == "ADJ") %>% 
+  count(lemma, sort = T, name = "count") %>% 
+  with(wordcloud(lemma, count, max.words = 100))
+)
+
+####################### Get top noun-adjective pairs via RAKE #######################
+noun_adj <- keywords_rake(x = podcast_annotate_df, term = "lemma", group = "doc_id", 
+                       relevant = podcast_annotate_df$upos %in% c("NOUN", "ADJ"))
 
 
-```{r}
-podcast_words <- "Listen and subscribe to our podcast at Apple Podcasts, Stitcher, or elsewhere. Below is a transcript of the episode, edited for readability. For more information on the people and ideas in the episode, see the links at the bottom of this post. Freakonomics Radio is produced by Stitcher and Dubner Productions. This episode was produced by Daphne Chen. Our staff also includes Alison Craiglow, Greg Rippin, Matt Hickey, Corinne Wallace, Zack Lapinski, and Mary Diduch. Our intern is Emma Tyrrell; we had help this week from James Foster. Our theme song is "Mr. Fortune," by the Hitchhikers; all the other music was composed by Luis Guerra. You can subscribe to Freakonomics Radio on Apple Podcasts, Stitcher, or wherever you get your podcasts."
+######## Visualize that ########
+ggsave('freak_rake.png',
+noun_adj %>% 
+  filter(ngram >1 2) %>% 
+  head(20) %>%
+  ggplot(., aes(x = fct_reorder(keyword, rake), y = rake)) +
+    geom_histogram(stat = "identity") + 
+    coord_flip() + 
+    labs(title = "Freakonomics Radio Top Phrases",
+         subtitle = "Identified by Rapid Automatic Keyword Extraction (RAKE)",
+         y = "RAKE",
+         x = "Phrase")
+)
 
 
-promo_words <- data.frame(podcast_words) %>% 
-  mutate(podcast_words = as.character(podcast_words)) %>% 
-  unnest_tokens(word, podcast_words)
+####################### Get top noun-verb pairs #######################
+podcast_annotate_df$phrase_tag <- as_phrasemachine(podcast_annotate_df$upos, type = "upos")
+noun_verb <- keywords_phrases(x = podcast_annotate_df$phrase_tag, term = tolower(podcast_annotate_df$token), 
+                          pattern = "(A|N)*N(P+D*(A|N)*N)*", 
+                          is_regex = TRUE, detailed = FALSE)
 
+
+######## Visualize that ########
+ggsave('freak_noun_verb.png',
+noun_verb %>% 
+  filter(ngram > 1) %>% 
+  arrange(desc(freq)) %>% 
+  head(20) %>%
+  ggplot(., aes(x = fct_reorder(keyword, freq), y = freq)) +
+    geom_histogram(stat = "identity") + 
+    coord_flip() + 
+    labs(title = "Freakonomics Radio Top Noun-Verb Phrases",
+         y = "Frequency",
+         x = "Phrase")
+)
 ```
